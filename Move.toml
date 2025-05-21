@@ -1,0 +1,16 @@
+[package]
+name = "score-aptos"
+version = "1.0.0"
+authors = []
+
+[addresses]
+score_addr = "c8fbacb88102686835801c46eb5bc15be4308de80f9fc58a4103bfb26ed10871"
+
+[dev-addresses]
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-framework.git"
+rev = "mainnet"
+subdir = "aptos-framework"
+
+[dev-dependencies]
