@@ -1,16 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math/big"
-	"net/http"
-	"strconv"
-)
 
+	"github.com/aptos-labs/aptos-go-sdk"
+	"github.com/aptos-labs/aptos-go-sdk/bcs"
+)
 
 type FooResult struct {
 	U8       uint8
@@ -26,60 +23,143 @@ type FooResult struct {
 }
 
 func main() {
+	client, err := aptos.NewClient(aptos.TestnetConfig)
+	if err != nil {
+		fmt.Printf("Failed to create client: %v\n", err)
+		return
+	}
+
 	accountAddress := "0xc8fbacb88102686835801c46eb5bc15be4308de80f9fc58a4103bfb26ed10871"
-
-	functionID := fmt.Sprintf("%s::PrimitiveTypes::foo", accountAddress)
-
-	url := "https://api.testnet.aptoslabs.com/v1/view"
 
 	pU8 := uint8(42)
 	pU16 := uint16(12345)
 	pU32 := uint32(12345678)
-	pU64 := "1234567890123"
-	pU128 := "12345678901234567890"
-	pU256 := "123456789012345678901234567890"
+	pU64 := uint64(1234567890123)
+	pU128 := big.NewInt(0)
+	pU128.SetString("12345678901234567890", 10)
+	pU256 := big.NewInt(0)
+	pU256.SetString("123456789012345678901234567890", 10)
 	pBool := true
 	pAddress := "0xc8fbacb88102686835801c46eb5bc15be4308de80f9fc58a4103bfb26ed10871"
 	pString := "Hello, World!"
-	pVector := hex.EncodeToString([]byte("hello"))
+	pVector := []byte("hello")
 
-	payload := []byte(fmt.Sprintf(`{
-		"function": "%s",
-		"type_arguments": [],
-		"arguments": [
-			%d,
-			%d,
-			%d,
-			"%s",
-			"%s",
-			"%s",
-			%t,
-			"%s",
-			"%s",
-			"0x%s"
-		]
-	}`, functionID, pU8, pU16, pU32, pU64, pU128, pU256, pBool, pAddress, pString, pVector))
+	args := [][]byte{}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(payload))
+	u8Bytes, err := bcs.SerializeU8(pU8)
 	if err != nil {
-		fmt.Printf("Error making HTTP request: %v\n", err)
+		fmt.Printf("Failed to serialize u8: %v\n", err)
 		return
 	}
-	defer resp.Body.Close()
+	args = append(args, u8Bytes)
 
-	body, err := io.ReadAll(resp.Body)
+	u16Bytes, err := bcs.SerializeU16(pU16)
 	if err != nil {
-		fmt.Printf("Error reading response body: %v\n", err)
+		fmt.Printf("Failed to serialize u16: %v\n", err)
 		return
 	}
-	fmt.Printf("Raw response: %s\n", body)
+	args = append(args, u16Bytes)
 
-	var result []interface{}
-	err = json.Unmarshal(body, &result)
+	u32Bytes, err := bcs.SerializeU32(pU32)
 	if err != nil {
-		fmt.Printf("Error parsing JSON response: %v\n", err)
+		fmt.Printf("Failed to serialize u32: %v\n", err)
 		return
 	}
+	args = append(args, u32Bytes)
+
+	u64Bytes, err := bcs.SerializeU64(pU64)
+	if err != nil {
+		fmt.Printf("Failed to serialize u64: %v\n", err)
+		return
+	}
+	args = append(args, u64Bytes)
+
+	u128Bytes, err := bcs.SerializeU128(*pU128)
+	if err != nil {
+		fmt.Printf("Failed to serialize u128: %v\n", err)
+		return
+	}
+	args = append(args, u128Bytes)
+
+	u256Bytes, err := bcs.SerializeU256(*pU256)
+	if err != nil {
+		fmt.Printf("Failed to serialize u256: %v\n", err)
+		return
+	}
+	args = append(args, u256Bytes)
+
+	boolBytes, err := bcs.SerializeBool(pBool)
+	if err != nil {
+		fmt.Printf("Failed to serialize bool: %v\n", err)
+		return
+	}
+	args = append(args, boolBytes)
+
+	addrBytes, err := hex.DecodeString(pAddress[2:])
+	if err != nil {
+		fmt.Printf("Failed to decode address hex: %v\n", err)
+		return
+	}
+	if len(addrBytes) != 32 {
+		fmt.Printf("Expected 32-byte address, got %d bytes\n", len(addrBytes))
+		return
+	}
+	var addr aptos.AccountAddress
+	copy(addr[:], addrBytes)
+	addrArgBytes, err := bcs.SerializeSingle(func(ser *bcs.Serializer) {
+		ser.FixedBytes(addr[:])
+	})
+	if err != nil {
+		fmt.Printf("Failed to serialize address: %v\n", err)
+		return
+	}
+	args = append(args, addrArgBytes)
+
+	stringBytes, err := bcs.SerializeSingle(func(ser *bcs.Serializer) {
+		ser.WriteString(pString)
+	})
+	if err != nil {
+		fmt.Printf("Failed to serialize string: %v\n", err)
+		return
+	}
+	args = append(args, stringBytes)
+
+	vectorBytes, err := bcs.SerializeBytes(pVector)
+	if err != nil {
+		fmt.Printf("Failed to serialize vector<u8>: %v\n", err)
+		return
+	}
+	args = append(args, vectorBytes)
+
+	moduleAddrBytes, err := hex.DecodeString(accountAddress[2:])
+	if err != nil {
+		fmt.Printf("Failed to decode module address hex: %v\n", err)
+		return
+	}
+	if len(moduleAddrBytes) != 32 {
+		fmt.Printf("Expected 32-byte module address, got %d bytes\n", len(moduleAddrBytes))
+		return
+	}
+	var moduleAddr aptos.AccountAddress
+	copy(moduleAddr[:], moduleAddrBytes)
+	moduleId := aptos.ModuleId{
+		Address: moduleAddr,
+		Name:    "PrimitiveTypes",
+	}
+
+	viewPayload := aptos.ViewPayload{
+		Module:   moduleId,
+		Function: "foo",
+		ArgTypes: []aptos.TypeTag{},
+		Args:     args,
+	}
+
+	result, err := client.View(&viewPayload)
+	if err != nil {
+		fmt.Printf("Failed to call view function: %v\n", err)
+		return
+	}
+	fmt.Printf("Raw result: %v\n", result)
 
 	if len(result) != 10 {
 		fmt.Printf("Expected 10 results, got %d\n", len(result))
@@ -88,89 +168,117 @@ func main() {
 
 	var fooResult FooResult
 
-	u8, err := parseNumber(result[0], 8)
-	if err != nil {
-		fmt.Printf("Error parsing u8: %v\n", err)
-		return
-	}
-	fooResult.U8 = uint8(u8)
-
-	u16, err := parseNumber(result[1], 16)
-	if err != nil {
-		fmt.Printf("Error parsing u16: %v\n", err)
-		return
-	}
-	fooResult.U16 = uint16(u16)
-
-	u32, err := parseNumber(result[2], 32)
-	if err != nil {
-		fmt.Printf("Error parsing u32: %v\n", err)
-		return
-	}
-	fooResult.U32 = uint32(u32)
-
-	u64, err := parseStringNumber(result[3], 64)
-	if err != nil {
-		fmt.Printf("Error parsing u64: %v\n", err)
-		return
-	}
-	fooResult.U64 = uint64(u64)
-
-	var ok bool
-	fooResult.U128, ok = new(big.Int).SetString(result[4].(string), 10)
+	f8, ok := result[0].(float64)
 	if !ok {
-		fmt.Printf("Error parsing u128: %s\n", result[4])
+		fmt.Printf("Error converting u8: expected float64, got %T\n", result[0])
 		return
 	}
-
-	fooResult.U256, ok = new(big.Int).SetString(result[5].(string), 10)
-	if !ok {
-		fmt.Printf("Error parsing u256: %s\n", result[5])
+	u8Int, err := float64ToInt(f8, 8)
+	if err != nil {
+		fmt.Printf("Error converting u8: %v\n", err)
 		return
 	}
+	u8, err := aptos.ConvertToU8(u8Int)
+	if err != nil {
+		fmt.Printf("Error converting u8: %v\n", err)
+		return
+	}
+	fooResult.U8 = u8
 
-	boolVal, ok := result[6].(bool)
+	f16, ok := result[1].(float64)
 	if !ok {
-		fmt.Printf("Error parsing bool: %v\n", result[6])
+		fmt.Printf("Error converting u16: expected float64, got %T\n", result[1])
+		return
+	}
+	u16Int, err := float64ToInt(f16, 16)
+	if err != nil {
+		fmt.Printf("Error converting u16: %v\n", err)
+		return
+	}
+	u16, err := aptos.ConvertToU16(u16Int)
+	if err != nil {
+		fmt.Printf("Error converting u16: %v\n", err)
+		return
+	}
+	fooResult.U16 = u16
+
+	f32, ok := result[2].(float64)
+	if !ok {
+		fmt.Printf("Error converting u32: expected float64, got %T\n", result[2])
+		return
+	}
+	u32Int, err := float64ToInt(f32, 32)
+	if err != nil {
+		fmt.Printf("Error converting u32: %v\n", err)
+		return
+	}
+	u32, err := aptos.ConvertToU32(u32Int)
+	if err != nil {
+		fmt.Printf("Error converting u32: %v\n", err)
+		return
+	}
+	fooResult.U32 = u32
+
+	u64, err := aptos.ConvertToU64(result[3])
+	if err != nil {
+		fmt.Printf("Error converting u64: %v\n", err)
+		return
+	}
+	fooResult.U64 = u64
+
+	u128, err := aptos.ConvertToU128(result[4])
+	if err != nil {
+		fmt.Printf("Error converting u128: %v\n", err)
+		return
+	}
+	fooResult.U128 = u128
+
+	u256, err := aptos.ConvertToU256(result[5])
+	if err != nil {
+		fmt.Printf("Error converting u256: %v\n", err)
+		return
+	}
+	fooResult.U256 = u256
+
+	boolVal, err := aptos.ConvertToBool(result[6])
+	if err != nil {
+		fmt.Printf("Error converting bool: %v\n", err)
 		return
 	}
 	fooResult.Bool = boolVal
 
-	addrStr, ok := result[7].(string)
-	if !ok {
-		fmt.Printf("Error parsing address: %v\n", result[7])
-		return
-	}
-	addrBytes, err := hex.DecodeString(addrStr[2:])
+	addrPtr, err := aptos.ConvertToAddress(result[7])
 	if err != nil {
-		fmt.Printf("Error decoding address hex: %v\n", err)
+		fmt.Printf("Error converting address: %v\n", err)
 		return
 	}
-	if len(addrBytes) != 32 {
-		fmt.Printf("Expected 32-byte address, got %d bytes\n", len(addrBytes))
+	if addrPtr == nil {
+		fmt.Printf("Error: converted address is nil\n")
 		return
 	}
-	var addr [20]byte
-	copy(addr[:], addrBytes[12:32])
-	fooResult.Address = addr
+	addr = *addrPtr
+	var evmAddr [20]byte
+	copy(evmAddr[:], addr[12:32])
+	fooResult.Address = evmAddr
 
 	str, ok := result[8].(string)
 	if !ok {
-		fmt.Printf("Error parsing string: %v\n", result[8])
+		fmt.Printf("Error converting string: expected string, got %T\n", result[8])
 		return
 	}
 	fooResult.String = str
 
-	vec, ok := result[9].(string)
+	vecStr, ok := result[9].(string)
 	if !ok {
-		fmt.Printf("Error parsing vector<u8>: %v\n", result[9])
+		fmt.Printf("Error converting vector<u8>: expected string, got %T\n", result[9])
 		return
 	}
-	fooResult.VectorU8, err = hex.DecodeString(vec[2:])
+	vecBytes, err := aptos.ParseHex(vecStr)
 	if err != nil {
-		fmt.Printf("Error decoding vector<u8>: %v\n", err)
+		fmt.Printf("Error decoding vector<u8> hex: %v\n", err)
 		return
 	}
+	fooResult.VectorU8 = vecBytes
 
 	fmt.Printf("Results from foo:\n")
 	fmt.Printf("u8: %d\n", fooResult.U8)
@@ -185,21 +293,27 @@ func main() {
 	fmt.Printf("vector<u8): %x\n", fooResult.VectorU8)
 }
 
-func parseNumber(val interface{}, bitSize int) (uint64, error) {
-	f, ok := val.(float64)
-	if !ok {
-		return 0, fmt.Errorf("expected number, got %T", val)
-	}
-	if f < 0 || f != float64(uint64(f)) {
-		return 0, fmt.Errorf("value %v is not a valid unsigned integer", f)
-	}
-	return uint64(f), nil
-}
-
-func parseStringNumber(val interface{}, bitSize int) (uint64, error) {
-	s, ok := val.(string)
-	if !ok {
-		return 0, fmt.Errorf("expected string, got %T", val)
-	}
-	return strconv.ParseUint(s, 10, bitSize)
+func float64ToInt(f float64, bitSize int) (int, error) {
+    if f < 0 {
+        return 0, fmt.Errorf("value %v is negative, expected unsigned integer", f)
+    }
+    if f != float64(int64(f)) {
+        return 0, fmt.Errorf("value %v is not an integer", f)
+    }
+    i := int64(f)
+    var max int64
+    switch bitSize {
+    case 8:
+        max = 255
+    case 16:
+        max = 65535
+    case 32:
+        max = 4294967295
+    default:
+        return 0, fmt.Errorf("invalid bit size %d", bitSize)
+    }
+    if i > max {
+        return 0, fmt.Errorf("value %v exceeds max for %d-bit integer", f, bitSize)
+    }
+    return int(i), nil
 }
