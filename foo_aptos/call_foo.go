@@ -7,6 +7,8 @@ import (
 
 	"github.com/aptos-labs/aptos-go-sdk"
 	"github.com/aptos-labs/aptos-go-sdk/bcs"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 type FooResult struct {
@@ -154,7 +156,7 @@ func main() {
 		Args:     args,
 	}
 
-	result, err := client.View(&viewPayload)
+	result, err := client.View(&viewPayload) //[]any
 	if err != nil {
 		fmt.Printf("Failed to call view function: %v\n", err)
 		return
@@ -290,7 +292,52 @@ func main() {
 	fmt.Printf("bool: %v\n", fooResult.Bool)
 	fmt.Printf("address: 0x%x\n", fooResult.Address)
 	fmt.Printf("string: %s\n", fooResult.String)
-	fmt.Printf("vector<u8): %x\n", fooResult.VectorU8)
+	fmt.Printf("vector<u8>): %x\n", fooResult.VectorU8)
+
+	argumentMarshalings := []abi.ArgumentMarshaling{
+		{Name: "u8", Type: "uint8"},
+		{Name: "u16", Type: "uint16"},
+		{Name: "u32", Type: "uint32"},
+		{Name: "u64", Type: "uint64"},
+		{Name: "u128", Type: "uint128"},
+		{Name: "u256", Type: "uint256"},
+		{Name: "bool", Type: "bool"},
+		{Name: "address", Type: "address"},
+		{Name: "str", Type: "string"},
+		{Name: "vec", Type: "bytes"},
+	}
+
+	abiType, err := abi.NewType("tuple", "", argumentMarshalings)
+	if err != nil {
+		fmt.Printf("Failed to create ABI type: %v\n", err)
+		return
+	}
+
+	argsABI := abi.Arguments{}
+	for i, argMarshaling := range argumentMarshalings {
+		argsABI = append(argsABI, abi.Argument{
+			Name: argMarshaling.Name,
+			Type: *abiType.TupleElems[i],
+		})
+	}
+
+	encoded, err := argsABI.Pack(
+		fooResult.U8,
+		fooResult.U16,
+		fooResult.U32,
+		fooResult.U64,
+		fooResult.U128,
+		fooResult.U256,
+		fooResult.Bool,
+		common.BytesToAddress(fooResult.Address[:]),
+		fooResult.String,
+		fooResult.VectorU8,
+	)
+	if err != nil {
+		fmt.Printf("Failed to ABI encode: %v\n", err)
+		return
+	}
+	fmt.Printf("ABI encoded result: 0x%x\n", encoded)
 }
 
 func float64ToInt(f float64, bitSize int) (int, error) {
